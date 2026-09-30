@@ -11,6 +11,9 @@
   Unicode quotes/dashes and will throw misleading parse errors far below the
   real bad character.
 
+  Pass adb/fastboot args as arrays only, e.g. Invoke-Adb @('shell','uname','-a').
+  Bare flags like -a must never be loose tokens after a function name.
+
 .PARAMETER OutDir
   Directory for the report. Default: same folder as this script.
 
@@ -22,28 +25,22 @@
 .PARAMETER SkipFastboot
   Do not reboot into fastboot. Use when you only want adb props.
 
-.PARAMETER FastbootTimeoutSec
-  Seconds to wait for a fastboot device after reboot. Default: 90.
-
 .EXAMPLE
   .\xp8-adb-inventory.ps1
-
-.EXAMPLE
-  .\xp8-adb-inventory.ps1 -ToolsDir C:\platform-tools
 
 .EXAMPLE
   .\xp8-adb-inventory.ps1 -SkipFastboot
 
 .NOTES
   Requires adb.exe; fastboot.exe is expected beside it in the same folder.
-  Test phone / throwaway units only if you allow the reboot path.
+  Fastboot stage waits for you to confirm the phone is in fastboot mode.
+  If Windows blocks the script: Unblock-File .\xp8-adb-inventory.ps1
 #>
 [CmdletBinding()]
 param(
     [string]$OutDir = "",
     [string]$ToolsDir = "",
-    [switch]$SkipFastboot,
-    [int]$FastbootTimeoutSec = 90
+    [switch]$SkipFastboot
 )
 
 $ErrorActionPreference = "Continue"
@@ -83,19 +80,27 @@ function Resolve-PlatformTools {
     return $null
 }
 
+# Always call as: Invoke-Adb @('shell','uname','-a')
+# Never: Invoke-Adb shell uname -a  (PowerShell steals -a as a parameter name)
 function Invoke-Adb {
-    param([Parameter(ValueFromRemainingArguments = $true)][string[]]$ArgumentList)
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$ArgumentList
+    )
     & $script:AdbExe @ArgumentList 2>&1 | ForEach-Object { "$_" }
 }
 
 function Invoke-Fastboot {
-    param([Parameter(ValueFromRemainingArguments = $true)][string[]]$ArgumentList)
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$ArgumentList
+    )
     & $script:FastbootExe @ArgumentList 2>&1 | ForEach-Object { "$_" }
 }
 
 function Get-Prop {
     param([string]$Name)
-    $raw = (Invoke-Adb shell getprop $Name) -join "`n"
+    $raw = (Invoke-Adb -ArgumentList @('shell', 'getprop', $Name)) -join "`n"
     return ($raw -replace "`r", "").Trim()
 }
 
@@ -104,23 +109,16 @@ function Wait-AdbDevice {
     Write-Host "Waiting for adb device (up to ${TimeoutSec}s)..."
     $deadline = (Get-Date).AddSeconds($TimeoutSec)
     while ((Get-Date) -lt $deadline) {
-        $state = (Invoke-Adb get-state) -join ""
+        $state = (Invoke-Adb -ArgumentList @('get-state')) -join ""
         if ($state -match "device") { return $true }
         Start-Sleep -Seconds 2
     }
     return $false
 }
 
-function Wait-FastbootDevice {
-    param([int]$TimeoutSec = 90)
-    Write-Host "Waiting for fastboot device (up to ${TimeoutSec}s)..."
-    $deadline = (Get-Date).AddSeconds($TimeoutSec)
-    while ((Get-Date) -lt $deadline) {
-        $devs = (Invoke-Fastboot devices) -join "`n"
-        if ($devs -match "\s+fastboot") { return $true }
-        Start-Sleep -Seconds 2
-    }
-    return $false
+function Test-FastbootPresent {
+    $devs = (Invoke-Fastboot -ArgumentList @('devices')) -join "`n"
+    return ($devs -match "\s+fastboot")
 }
 
 function Add-Section {
@@ -177,7 +175,7 @@ $sb = New-Object System.Text.StringBuilder
 # --- adb device presence -----------------------------------------------------
 
 Write-Host "Checking adb..."
-$devices = (Invoke-Adb devices -l) -join "`n"
+$devices = (Invoke-Adb -ArgumentList @('devices', '-l')) -join "`n"
 Add-Section $sb "adb devices -l" $devices
 
 if ($devices -notmatch "\sdevice\b") {
@@ -257,12 +255,10 @@ foreach ($p in $propNames) {
 }
 Add-Section $sb "Key getprop values" ($propLines -join "`n")
 
-# Full getprop dump (large but useful for SKU / Sonim-specific keys)
 Write-Host "Dumping full getprop..."
-$allProps = (Invoke-Adb shell getprop) -join "`n"
+$allProps = (Invoke-Adb -ArgumentList @('shell', 'getprop')) -join "`n"
 Add-Section $sb "Full getprop" $allProps
 
-# Filter Sonim / carrier-ish keys for a quick skim
 $interesting = ($allProps -split "`n" | Where-Object {
     $_ -match "(?i)sonim|xp8|carrier|sku|oem|unlock|verity|vbmeta|att|verizon|telus|baseband|radio|imei|ril|abl|xbl|magisk|kernel"
 }) -join "`n"
@@ -270,8 +266,8 @@ Add-Section $sb "Filtered props (carrier/unlock/radio/sku)" $interesting
 
 # --- Settings / unlock toggle ------------------------------------------------
 
-$oemSetting = (Invoke-Adb shell settings get global oem_unlock_allowed) -join "`n"
-$devSettings = (Invoke-Adb shell settings list global) -join "`n"
+$oemSetting = (Invoke-Adb -ArgumentList @('shell', 'settings', 'get', 'global', 'oem_unlock_allowed')) -join "`n"
+$devSettings = (Invoke-Adb -ArgumentList @('shell', 'settings', 'list', 'global')) -join "`n"
 $devFiltered = ($devSettings -split "`n" | Where-Object {
     $_ -match "(?i)oem|unlock|adb|development|verifier|boot"
 }) -join "`n"
@@ -283,16 +279,16 @@ Add-Section $sb "Filtered global settings" $devFiltered
 Write-Host "Checking root / Magisk..."
 $rootBits = New-Object System.Text.StringBuilder
 [void]$rootBits.AppendLine("--- id ---")
-[void]$rootBits.AppendLine(((Invoke-Adb shell id) -join "`n"))
+[void]$rootBits.AppendLine(((Invoke-Adb -ArgumentList @('shell', 'id')) -join "`n"))
 [void]$rootBits.AppendLine("--- which su ---")
-[void]$rootBits.AppendLine(((Invoke-Adb shell which su) -join "`n"))
+[void]$rootBits.AppendLine(((Invoke-Adb -ArgumentList @('shell', 'which', 'su')) -join "`n"))
 [void]$rootBits.AppendLine("--- su -c id (may fail) ---")
-[void]$rootBits.AppendLine(((Invoke-Adb shell su -c id) -join "`n"))
+[void]$rootBits.AppendLine(((Invoke-Adb -ArgumentList @('shell', 'su', '-c', 'id')) -join "`n"))
 [void]$rootBits.AppendLine("--- magisk -v / magisk --path ---")
-[void]$rootBits.AppendLine(((Invoke-Adb shell magisk -v) -join "`n"))
-[void]$rootBits.AppendLine(((Invoke-Adb shell magisk --path) -join "`n"))
+[void]$rootBits.AppendLine(((Invoke-Adb -ArgumentList @('shell', 'magisk', '-v')) -join "`n"))
+[void]$rootBits.AppendLine(((Invoke-Adb -ArgumentList @('shell', 'magisk', '--path')) -join "`n"))
 [void]$rootBits.AppendLine("--- ls /data/adb ---")
-[void]$rootBits.AppendLine(((Invoke-Adb shell ls -la /data/adb) -join "`n"))
+[void]$rootBits.AppendLine(((Invoke-Adb -ArgumentList @('shell', 'ls', '-la', '/data/adb')) -join "`n"))
 [void]$rootBits.AppendLine("--- getprop | grep -i magisk ---")
 [void]$rootBits.AppendLine((($allProps -split "`n" | Where-Object { $_ -match "(?i)magisk" }) -join "`n"))
 Add-Section $sb "Root / Magisk indicators" $rootBits.ToString()
@@ -302,19 +298,19 @@ Add-Section $sb "Root / Magisk indicators" $rootBits.ToString()
 Write-Host "Collecting slot / bootctl / partitions..."
 $slotBits = New-Object System.Text.StringBuilder
 [void]$slotBits.AppendLine("--- bootctl get-current-slot / get-number-slots ---")
-[void]$slotBits.AppendLine(((Invoke-Adb shell bootctl get-current-slot) -join "`n"))
-[void]$slotBits.AppendLine(((Invoke-Adb shell bootctl get-number-slots) -join "`n"))
+[void]$slotBits.AppendLine(((Invoke-Adb -ArgumentList @('shell', 'bootctl', 'get-current-slot')) -join "`n"))
+[void]$slotBits.AppendLine(((Invoke-Adb -ArgumentList @('shell', 'bootctl', 'get-number-slots')) -join "`n"))
 [void]$slotBits.AppendLine("--- getprop ro.boot.slot_suffix ---")
 [void]$slotBits.AppendLine((Get-Prop "ro.boot.slot_suffix"))
 [void]$slotBits.AppendLine("--- ls -l /dev/block/bootdevice/by-name ---")
-[void]$slotBits.AppendLine(((Invoke-Adb shell ls -l /dev/block/bootdevice/by-name) -join "`n"))
+[void]$slotBits.AppendLine(((Invoke-Adb -ArgumentList @('shell', 'ls', '-l', '/dev/block/bootdevice/by-name')) -join "`n"))
 [void]$slotBits.AppendLine("--- cat /proc/version ---")
-[void]$slotBits.AppendLine(((Invoke-Adb shell cat /proc/version) -join "`n"))
+[void]$slotBits.AppendLine(((Invoke-Adb -ArgumentList @('shell', 'cat', '/proc/version')) -join "`n"))
 [void]$slotBits.AppendLine("--- uname -a ---")
-[void]$slotBits.AppendLine(((Invoke-Adb shell uname -a) -join "`n"))
+[void]$slotBits.AppendLine(((Invoke-Adb -ArgumentList @('shell', 'uname', '-a')) -join "`n"))
 Add-Section $sb "Slots / kernel / by-name" $slotBits.ToString()
 
-# --- Telephony / IMEI health (baseband already known dead is fine) -----------
+# --- Telephony / IMEI health -------------------------------------------------
 
 Write-Host "Collecting telephony / IMEI (may be empty if baseband dead)..."
 $radioBits = New-Object System.Text.StringBuilder
@@ -322,7 +318,7 @@ $radioBits = New-Object System.Text.StringBuilder
 [void]$radioBits.AppendLine("gsm.version.baseband=$(Get-Prop 'gsm.version.baseband')")
 [void]$radioBits.AppendLine("ro.baseband=$(Get-Prop 'ro.baseband')")
 [void]$radioBits.AppendLine("--- dumpsys iphonesubinfo (may need root) ---")
-[void]$radioBits.AppendLine(((Invoke-Adb shell dumpsys iphonesubinfo) -join "`n"))
+[void]$radioBits.AppendLine(((Invoke-Adb -ArgumentList @('shell', 'dumpsys', 'iphonesubinfo')) -join "`n"))
 [void]$radioBits.AppendLine("--- getprop filter imei/ril/radio/baseband/gsm ---")
 [void]$radioBits.AppendLine((($allProps -split "`n" | Where-Object {
     $_ -match "(?i)imei|ril\.|radio|baseband|gsm\.|CDMA|lte"
@@ -332,45 +328,68 @@ Add-Section $sb "Radio / IMEI props" $radioBits.ToString()
 # --- Optional: packages that hint at tooling ---------------------------------
 
 Write-Host "Listing Magisk / unlock-related packages..."
-$pkgs = (Invoke-Adb shell pm list packages) -join "`n"
+$pkgs = (Invoke-Adb -ArgumentList @('shell', 'pm', 'list', 'packages')) -join "`n"
 $pkgFiltered = ($pkgs -split "`n" | Where-Object {
     $_ -match "(?i)magisk|superuser|unlock|sonim|qualcomm|qti|edl|twrp"
 }) -join "`n"
 Add-Section $sb "Filtered packages" $pkgFiltered
 
-# --- Fastboot (optional reboot) ----------------------------------------------
+# --- Fastboot (manual confirm) -----------------------------------------------
 
 if (-not $SkipFastboot) {
     Write-Host ""
-    Write-Host "Rebooting to fastboot for unlock vars (Ctrl+C within 5s to abort)..."
-    Start-Sleep -Seconds 5
+    Write-Host "Fastboot stage (manual confirm)."
+    Write-Host "The phone will reboot to the bootloader, then the script waits for you."
+    [void](Read-Host "Press Enter to reboot to bootloader (Ctrl+C to abort)")
 
-    Invoke-Adb reboot bootloader | Out-Null
-    if (-not (Wait-FastbootDevice -TimeoutSec $FastbootTimeoutSec)) {
-        Add-Section $sb "fastboot" "TIMEOUT: no fastboot device within ${FastbootTimeoutSec}s"
-        Write-Warning "Fastboot timeout. Phone may still be in bootloader - recover manually (hold power) or: fastboot reboot"
-    } else {
+    Write-Host "Rebooting to bootloader..."
+    Invoke-Adb -ArgumentList @('reboot', 'bootloader') | Out-Null
+
+    Write-Host ""
+    Write-Host "On the phone, confirm you see the fastboot / bootloader screen."
+    Write-Host "USB should still be plugged in."
+    while ($true) {
+        [void](Read-Host "When the phone is in fastboot mode, press Enter to continue")
+        if (Test-FastbootPresent) {
+            Write-Host "fastboot device detected."
+            break
+        }
+        Write-Warning "No fastboot device yet (fastboot devices was empty)."
+        $retry = Read-Host "Try again? [Y]es / [S]kip fastboot / [A]bort report (default Y)"
+        if ($retry -match '^[sS]') {
+            Add-Section $sb "fastboot" "Skipped by user after reboot (device not seen)"
+            $SkipFastboot = $true
+            break
+        }
+        if ($retry -match '^[aA]') {
+            Add-Section $sb "fastboot" "Aborted by user after reboot (device not seen)"
+            $sb.ToString() | Set-Content -Path $reportPath -Encoding ASCII
+            Write-Host "Partial report: $reportPath"
+            exit 3
+        }
+    }
+
+    if (-not $SkipFastboot) {
         Write-Host "Collecting fastboot vars..."
         $fb = New-Object System.Text.StringBuilder
         [void]$fb.AppendLine("--- fastboot devices ---")
-        [void]$fb.AppendLine(((Invoke-Fastboot devices) -join "`n"))
+        [void]$fb.AppendLine(((Invoke-Fastboot -ArgumentList @('devices')) -join "`n"))
         [void]$fb.AppendLine("--- fastboot getvar all ---")
-        # getvar all prints to stderr on many platform-tools builds
-        [void]$fb.AppendLine(((Invoke-Fastboot getvar all) -join "`n"))
+        [void]$fb.AppendLine(((Invoke-Fastboot -ArgumentList @('getvar', 'all')) -join "`n"))
         [void]$fb.AppendLine("--- fastboot oem device-info ---")
-        [void]$fb.AppendLine(((Invoke-Fastboot oem device-info) -join "`n"))
+        [void]$fb.AppendLine(((Invoke-Fastboot -ArgumentList @('oem', 'device-info')) -join "`n"))
         [void]$fb.AppendLine("--- fastboot getvar unlocked ---")
-        [void]$fb.AppendLine(((Invoke-Fastboot getvar unlocked) -join "`n"))
+        [void]$fb.AppendLine(((Invoke-Fastboot -ArgumentList @('getvar', 'unlocked')) -join "`n"))
         [void]$fb.AppendLine("--- fastboot getvar secure ---")
-        [void]$fb.AppendLine(((Invoke-Fastboot getvar secure) -join "`n"))
+        [void]$fb.AppendLine(((Invoke-Fastboot -ArgumentList @('getvar', 'secure')) -join "`n"))
         [void]$fb.AppendLine("--- fastboot getvar current-slot ---")
-        [void]$fb.AppendLine(((Invoke-Fastboot getvar current-slot) -join "`n"))
+        [void]$fb.AppendLine(((Invoke-Fastboot -ArgumentList @('getvar', 'current-slot')) -join "`n"))
         [void]$fb.AppendLine("--- fastboot getvar version-bootloader ---")
-        [void]$fb.AppendLine(((Invoke-Fastboot getvar version-bootloader) -join "`n"))
+        [void]$fb.AppendLine(((Invoke-Fastboot -ArgumentList @('getvar', 'version-bootloader')) -join "`n"))
         Add-Section $sb "fastboot unlock / slot vars" $fb.ToString()
 
         Write-Host "Rebooting back to Android..."
-        Invoke-Fastboot reboot | Out-Null
+        Invoke-Fastboot -ArgumentList @('reboot') | Out-Null
         if (Wait-AdbDevice -TimeoutSec 180) {
             Add-Section $sb "post-fastboot adb" "device back online"
         } else {
@@ -401,7 +420,6 @@ $summaryLines.Add("debuggable=$(Get-Prop 'ro.debuggable')")
 $summaryLines.Add("baseband=$(Get-Prop 'gsm.version.baseband')")
 Add-Section $sb "SUMMARY (quick)" ($summaryLines -join "`n")
 
-# ASCII report avoids Unicode surprises when pasting from Windows editors
 $sb.ToString() | Set-Content -Path $reportPath -Encoding ASCII
 
 Write-Host ""
