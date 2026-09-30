@@ -1,0 +1,43 @@
+# Inventory / dumps
+*.txt
+!LICENSE.txt
+xp8-inventory-*.txt
+*.log
+*.dump
+dumps/
+inventory/
+
+# Secrets / local env
+.env
+.env.*
+*.pem
+*.key
+*.token
+secrets/
+credentials/
+
+# Firmware / binaries (large or sensitive)
+*.bin
+*.elf
+*.img
+*.MBN
+*.mbn
+*.melf
+*.zip
+*.7z
+*.rar
+*.tar
+*.tar.gz
+*.tgz
+*.sparseimage
+*.raw
+*.qcn
+*.xml
+!**/docs/**
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
