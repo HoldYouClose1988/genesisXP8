@@ -7,6 +7,10 @@
   (optional) fastboot unlock state. Writes a timestamped report next to the script
   (or under -OutDir) and prints the path when done.
 
+  IMPORTANT: Keep this file ASCII-only. Windows PowerShell 5.1 is picky about
+  Unicode quotes/dashes and will throw misleading parse errors far below the
+  real bad character.
+
 .PARAMETER OutDir
   Directory for the report. Default: same folder as this script.
 
@@ -80,13 +84,13 @@ function Resolve-PlatformTools {
 }
 
 function Invoke-Adb {
-    param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Args)
-    & $script:AdbExe @Args 2>&1 | ForEach-Object { "$_" }
+    param([Parameter(ValueFromRemainingArguments = $true)][string[]]$ArgumentList)
+    & $script:AdbExe @ArgumentList 2>&1 | ForEach-Object { "$_" }
 }
 
 function Invoke-Fastboot {
-    param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Args)
-    & $script:FastbootExe @Args 2>&1 | ForEach-Object { "$_" }
+    param([Parameter(ValueFromRemainingArguments = $true)][string[]]$ArgumentList)
+    & $script:FastbootExe @ArgumentList 2>&1 | ForEach-Object { "$_" }
 }
 
 function Get-Prop {
@@ -165,7 +169,6 @@ $sb = New-Object System.Text.StringBuilder
 
 [void]$sb.AppendLine("Sonim XP8 inventory")
 [void]$sb.AppendLine("Captured: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss K')")
-[void]$sb.AppendLine("Host: (omitted)")
 [void]$sb.AppendLine("ToolsDir: $resolvedToolsDir")
 [void]$sb.AppendLine("adb: $script:AdbExe")
 [void]$sb.AppendLine("fastboot: $script:FastbootExe")
@@ -179,7 +182,7 @@ Add-Section $sb "adb devices -l" $devices
 
 if ($devices -notmatch "\sdevice\b") {
     Write-Error "No authorized adb device in 'device' state. Unlock phone, accept RSA prompt, retry."
-    $sb.ToString() | Set-Content -Path $reportPath -Encoding UTF8
+    $sb.ToString() | Set-Content -Path $reportPath -Encoding ASCII
     Write-Host "Partial report: $reportPath"
     exit 2
 }
@@ -303,7 +306,7 @@ $slotBits = New-Object System.Text.StringBuilder
 [void]$slotBits.AppendLine(((Invoke-Adb shell bootctl get-number-slots) -join "`n"))
 [void]$slotBits.AppendLine("--- getprop ro.boot.slot_suffix ---")
 [void]$slotBits.AppendLine((Get-Prop "ro.boot.slot_suffix"))
-[void]$slotBits.AppendLine("--- ls -l /dev/block/bootdevice/by-name (head) ---")
+[void]$slotBits.AppendLine("--- ls -l /dev/block/bootdevice/by-name ---")
 [void]$slotBits.AppendLine(((Invoke-Adb shell ls -l /dev/block/bootdevice/by-name) -join "`n"))
 [void]$slotBits.AppendLine("--- cat /proc/version ---")
 [void]$slotBits.AppendLine(((Invoke-Adb shell cat /proc/version) -join "`n"))
@@ -320,7 +323,7 @@ $radioBits = New-Object System.Text.StringBuilder
 [void]$radioBits.AppendLine("ro.baseband=$(Get-Prop 'ro.baseband')")
 [void]$radioBits.AppendLine("--- dumpsys iphonesubinfo (may need root) ---")
 [void]$radioBits.AppendLine(((Invoke-Adb shell dumpsys iphonesubinfo) -join "`n"))
-[void]$radioBits.AppendLine("--- getprop | grep -iE 'imei|ril|radio|baseband|gsm' ---")
+[void]$radioBits.AppendLine("--- getprop filter imei/ril/radio/baseband/gsm ---")
 [void]$radioBits.AppendLine((($allProps -split "`n" | Where-Object {
     $_ -match "(?i)imei|ril\.|radio|baseband|gsm\.|CDMA|lte"
 }) -join "`n"))
@@ -345,7 +348,7 @@ if (-not $SkipFastboot) {
     Invoke-Adb reboot bootloader | Out-Null
     if (-not (Wait-FastbootDevice -TimeoutSec $FastbootTimeoutSec)) {
         Add-Section $sb "fastboot" "TIMEOUT: no fastboot device within ${FastbootTimeoutSec}s"
-        Write-Warning "Fastboot timeout. Phone may still be in bootloader — recover manually (hold power) or: fastboot reboot"
+        Write-Warning "Fastboot timeout. Phone may still be in bootloader - recover manually (hold power) or: fastboot reboot"
     } else {
         Write-Host "Collecting fastboot vars..."
         $fb = New-Object System.Text.StringBuilder
@@ -381,28 +384,28 @@ if (-not $SkipFastboot) {
 
 # --- Summary cheat sheet -----------------------------------------------------
 
-$summary = @"
-model=$(Get-Prop 'ro.product.model')
-device=$(Get-Prop 'ro.product.device')
-fingerprint=$(Get-Prop 'ro.build.fingerprint')
-display.id=$(Get-Prop 'ro.build.display.id')
-release=$(Get-Prop 'ro.build.version.release')
-build.type=$(Get-Prop 'ro.build.type')
-build.tags=$(Get-Prop 'ro.build.tags')
-slot_suffix=$(Get-Prop 'ro.boot.slot_suffix')
-verifiedbootstate=$(Get-Prop 'ro.boot.verifiedbootstate')
-flash.locked=$(Get-Prop 'ro.boot.flash.locked')
-oem_unlock_supported=$(Get-Prop 'ro.oem_unlock_supported')
-oem_unlock_allowed(setting)=$($oemSetting.Trim())
-debuggable=$(Get-Prop 'ro.debuggable')
-baseband=$(Get-Prop 'gsm.version.baseband')
-"@
-Add-Section $sb "SUMMARY (quick)" $summary
+$summaryLines = New-Object System.Collections.Generic.List[string]
+$summaryLines.Add("model=$(Get-Prop 'ro.product.model')")
+$summaryLines.Add("device=$(Get-Prop 'ro.product.device')")
+$summaryLines.Add("fingerprint=$(Get-Prop 'ro.build.fingerprint')")
+$summaryLines.Add("display.id=$(Get-Prop 'ro.build.display.id')")
+$summaryLines.Add("release=$(Get-Prop 'ro.build.version.release')")
+$summaryLines.Add("build.type=$(Get-Prop 'ro.build.type')")
+$summaryLines.Add("build.tags=$(Get-Prop 'ro.build.tags')")
+$summaryLines.Add("slot_suffix=$(Get-Prop 'ro.boot.slot_suffix')")
+$summaryLines.Add("verifiedbootstate=$(Get-Prop 'ro.boot.verifiedbootstate')")
+$summaryLines.Add("flash.locked=$(Get-Prop 'ro.boot.flash.locked')")
+$summaryLines.Add("oem_unlock_supported=$(Get-Prop 'ro.oem_unlock_supported')")
+$summaryLines.Add("oem_unlock_allowed(setting)=$($oemSetting.Trim())")
+$summaryLines.Add("debuggable=$(Get-Prop 'ro.debuggable')")
+$summaryLines.Add("baseband=$(Get-Prop 'gsm.version.baseband')")
+Add-Section $sb "SUMMARY (quick)" ($summaryLines -join "`n")
 
-$sb.ToString() | Set-Content -Path $reportPath -Encoding UTF8
+# ASCII report avoids Unicode surprises when pasting from Windows editors
+$sb.ToString() | Set-Content -Path $reportPath -Encoding ASCII
 
 Write-Host ""
 Write-Host "Done."
 Write-Host "Report: $reportPath"
 Write-Host ""
-Write-Host "Review the SUMMARY section before sharing; it may contain device identifiers."
+Write-Host "Paste the SUMMARY section (or the whole file) back into the Project chat."

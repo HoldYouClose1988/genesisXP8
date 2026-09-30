@@ -23,6 +23,8 @@ This repo is **research documentation**, not a turnkey unlock toolkit. No exploi
 
 ## Run the inventory script
 
+The script is ASCII-only for Windows PowerShell 5.1 compatibility.
+
 Requires [platform-tools](https://developer.android.com/tools/releases/platform-tools) (`adb` + `fastboot`) and an authorized USB debugging session.
 
 ```powershell
