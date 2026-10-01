@@ -24,6 +24,7 @@ This repo is **research documentation**, not a turnkey unlock toolkit. No exploi
 | [`scripts/xp8-adb-inventory.ps1`](scripts/xp8-adb-inventory.ps1) | PowerShell adb/fastboot device inventory |
 | [`scripts/xp8-oem-unlock-attempt.ps1`](scripts/xp8-oem-unlock-attempt.ps1) | Guided OEM unlock allowance + fastboot attempt |
 | [`scripts/xp8-edl-abl-prep.ps1`](scripts/xp8-edl-abl-prep.ps1) | EDL read-only abl/xbl dump prep (optional guarded write templates) |
+| [`scripts/xp8-patch-devinfo.ps1`](scripts/xp8-patch-devinfo.ps1) | Patches a local devinfo dump (offset 0x10) for a later QFIL write |
 
 ## Run the inventory script
 
