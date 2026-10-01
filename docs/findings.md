@@ -2,7 +2,26 @@
 
 Updated: 2026-10-01
 
-Observations from the test unit after a full QFIL flash of the matching AT&T userdebug package, a stable fastboot session, and a QFIL read of `abl_a` and `devinfo`. No serials, IMEI, hostnames, or raw dumps.
+Bootloader unlock succeeded on 2026-10-01 on the ATT XP8812 Android 8.1.0 userdebug test phone, build `8A.0.5-11-8.1.0-10.54.00`.
+
+The sections below keep the earlier observations from that unit: a full QFIL flash of the matching AT&T userdebug package, a stable fastboot session, and a QFIL read of `abl_a` and `devinfo`, plus the `devinfo` patch that unlocked the bootloader. No serials, IMEI, hostnames, or raw dumps.
+
+## Confirmed unlock
+
+Method: the original `devinfo` partition was 4096 bytes and all zeros. [`scripts/xp8-patch-devinfo.ps1`](../scripts/xp8-patch-devinfo.ps1) built a patched image with a little-endian uint32 `1` at offset `0x10` (DeviceInfo unlock-allow flag from the ABL teardown). That image was written with QFIL. Then `fastboot flashing unlock` returned `OKAY`.
+
+Proof after reboot:
+
+| Check | Result |
+|-------|--------|
+| `fastboot getvar unlocked` | `yes` |
+| `ro.boot.flash.locked` | `0` |
+| `ro.boot.verifiedbootstate` | `orange` |
+| `sys.oem_unlock_allowed` | `1` |
+
+`fastboot getvar all` still returns `unknown command`. That is an ABL limitation, not a failed unlock. Unlock state is reported by `getvar unlocked`.
+
+Do not flash the Verizon donor ABL. Do not run `fastboot flashing lock` casually. Keep the original all-zero `devinfo` dump and write it back with QFIL if a later experiment needs the locked state.
 
 ## Device
 
@@ -23,7 +42,7 @@ OEM unlocking can be toggled in Developer options. After a fresh QFIL flash, `se
 
 ## Fastboot on the reflashed userdebug image
 
-Measured on a stable USB session:
+Measured on a stable USB session before the `devinfo` patch:
 
 | Command | Result |
 |---------|--------|
@@ -47,9 +66,13 @@ The first 110,592 bytes match. The rest of the partition dump is `0x00` padding.
 
 ## On-device `devinfo`
 
+Pre-patch QFIL read, before the unlock write:
+
 - Size: 4096 bytes
 - Contents: all zeros
-- Hypothesized DeviceInfo unlock-allow dword at offset `+0x10`: `0`
+- DeviceInfo unlock-allow dword at offset `+0x10`: `0`
+
+The successful unlock wrote the patched image (little-endian uint32 `1` at `0x10`) over this partition. The pre-patch contents really were all zeros.
 
 ## Static analysis (summarized)
 
@@ -59,15 +82,22 @@ A Verizon / Android 10 donor ABL lacks that unlock command surface. Do not flash
 
 A TWRP-pack `abl.elf` is a different size (~151,552 bytes) and is on hold.
 
-## Tension and next experiment
+## Tension, then the experiment
 
-A zero flag at `+0x10` would be expected to print `Flashing Unlock is not allowed`. The phone returned `unknown command` instead.
+A zero flag at `+0x10` would be expected to print `Flashing Unlock is not allowed`. Before the patch, the phone returned `unknown command` instead.
 
-The next experiment is still to write a patched `devinfo` (little-endian uint32 `1` at offset `0x10`) via QFIL and retest. Local patch helper: [`scripts/xp8-patch-devinfo.ps1`](../scripts/xp8-patch-devinfo.ps1). Keep the original dump and restore it if the device does not boot.
+That experiment was run on 2026-10-01: a patched `devinfo` (little-endian uint32 `1` at offset `0x10`), built with [`scripts/xp8-patch-devinfo.ps1`](../scripts/xp8-patch-devinfo.ps1) and written via QFIL. `fastboot flashing unlock` then returned `OKAY`. The earlier `unknown command` was the pre-patch state. Keep the original all-zero dump and restore it with QFIL if a later experiment needs the locked state. Do not run `fastboot flashing lock` casually.
 
-## If unlock stays blocked
+## What did not unlock the bootloader
 
-Keep using EDL/QFIL to write `boot` and `system`. Classic fastboot unlock is not available on this ABL as observed.
+- OEM unlocking toggle alone
+- `fastboot oem unlock` / `flashing unlock` before the devinfo patch (`unknown command`)
+- Re-flashing the same userdebug `abl` / `xbl` (already on the device)
+- Verizon / Android 10 donor ABL (missing the unlock command surface; not flashed)
+
+## If unlock had stayed blocked
+
+The fallback, had the patch failed, was to keep using EDL/QFIL to write `boot` and `system`. Classic fastboot unlock was not available on this ABL as observed before the patch. That fallback is not the current state: unlock succeeded.
 
 ## Background
 

@@ -4,7 +4,7 @@ Research notes and helper scripts for **Sonim XP8 (XP8800)** bootloader unlock w
 
 ## Current status
 
-ATT userdebug `8A.0.5-11-8.1.0-10.54.00` is on the phone. OEM unlocking can be toggled, but fastboot `flashing unlock`, `oem unlock`, and `flashing get_unlock_ability` all return `unknown command`. On-device `abl_a` matches the package ABL; `devinfo` is all zeros (unlock-allow dword at +0x10 is 0). Details: [`docs/findings.md`](docs/findings.md).
+Bootloader unlock succeeded on 2026-10-01 on the ATT XP8812 userdebug build `8A.0.5-11-8.1.0-10.54.00`: a patched `devinfo` (little-endian uint32 `1` at offset `+0x10`) written with QFIL, then `fastboot flashing unlock`. Details: [`docs/findings.md`](docs/findings.md).
 
 ## Status
 
@@ -12,7 +12,7 @@ ATT userdebug `8A.0.5-11-8.1.0-10.54.00` is on the phone. OEM unlocking can be t
 - **Official unlock:** no Sonim OEM unlock program; stock user builds generally do not unlock via `fastboot oem unlock` / `fastboot flashing unlock`.
 - **Practical mod path:** Qualcomm **EDL + Firehose** partition R/W (community `prog_emmc_ufs_firehose_Sdm660_ddr.elf`), not a clean fastboot unlock.
 - **True unlock:** inconsistently reported; best community trail is around **AT&T Android 8.1 userdebug / debug ABL+XBL**. Android 10 unlock commands are often `unknown command`.
-- **This unit (XP8812 A8.1 userdebug):** see [`docs/findings.md`](docs/findings.md). A full QFIL flash already wrote the package ABL/XBL; fastboot unlock commands still return `unknown command`.
+- **This unit (XP8812 A8.1 userdebug):** bootloader is unlocked via the `devinfo` `+0x10` flag. See [`docs/findings.md`](docs/findings.md).
 - **Custom ROMs:** no mature public LineageOS/GSI known to run reliably on XP8.
 
 This repo is **research documentation**, not a turnkey unlock toolkit. No exploit PoCs. Firmware blobs are not included.
@@ -21,7 +21,7 @@ This repo is **research documentation**, not a turnkey unlock toolkit. No exploi
 
 | Path | Contents |
 |------|----------|
-| [`docs/findings.md`](docs/findings.md) | Current device findings through the devinfo dump |
+| [`docs/findings.md`](docs/findings.md) | Confirmed bootloader unlock and earlier device findings |
 | [`docs/xp8-bootloader-unlock-research.md`](docs/xp8-bootloader-unlock-research.md) | XP8 unlock / EDL / carrier landscape |
 | [`docs/sdm630-bootloader-exploit-research.md`](docs/sdm630-bootloader-exploit-research.md) | SDM630/6xx public CVE & technique map (high-level) |
 | [`docs/sdm660-firehose-edl-research.md`](docs/sdm660-firehose-edl-research.md) | Firehose/EDL auth vs storage R/W mapped to XP8 |
@@ -29,7 +29,7 @@ This repo is **research documentation**, not a turnkey unlock toolkit. No exploi
 | [`scripts/xp8-adb-inventory.ps1`](scripts/xp8-adb-inventory.ps1) | PowerShell adb/fastboot device inventory |
 | [`scripts/xp8-oem-unlock-attempt.ps1`](scripts/xp8-oem-unlock-attempt.ps1) | Guided OEM unlock allowance + fastboot attempt |
 | [`scripts/xp8-edl-abl-prep.ps1`](scripts/xp8-edl-abl-prep.ps1) | EDL read-only abl/xbl dump prep (optional guarded write templates) |
-| [`scripts/xp8-patch-devinfo.ps1`](scripts/xp8-patch-devinfo.ps1) | Patches a local devinfo dump (offset 0x10) for a later QFIL write |
+| [`scripts/xp8-patch-devinfo.ps1`](scripts/xp8-patch-devinfo.ps1) | Builds the patched devinfo image (offset 0x10) used for the unlock |
 
 ## Run the inventory script
 
